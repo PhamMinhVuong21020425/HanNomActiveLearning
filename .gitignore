@@ -1,0 +1,10 @@
+data
+weights
+checkpoints
+wandb
+__pycache__
+.idea
+.vscode
+.ipynb_checkpoints
+*.pth
+*.pyc
