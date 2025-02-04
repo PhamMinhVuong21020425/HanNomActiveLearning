@@ -7,7 +7,7 @@ class BALDSampling(BaseStrategy):
         super(BALDSampling, self).__init__(dataset, net)
     def query(self, n):
         unlabeled_idxs, unlabeled_data = self.dataset.get_unlabeled_data()
-        probs = self.predict_prob_bald(unlabeled_data)
+        probs = self.predict_prob_bald(unlabeled_data) # torch.Size([N_INFER, N_UNLABELED_DATA, N_CLASS])
         mean_prob = probs.mean(0)
         entropy1 = (-mean_prob * torch.log(mean_prob)).sum(1)
         entropy2 = (-probs * torch.log(probs)).sum(2).mean(0)
