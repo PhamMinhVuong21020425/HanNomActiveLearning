@@ -238,9 +238,11 @@ Kết quả thực nghiệm với bộ 3 tham số: (N_INIT_LABELED, N_SAMPLES, 
 
     -   **N_SAMPLES** được chọn tùy thuộc vào khả năng gán nhãn của người dùng sau mỗi vòng lặp AL. Từ kết quả thực nghiệm, ta có thể thấy tham số này **càng nhỏ** thì hiệu suất của mô hình sau mỗi round **càng được cải thiện**. Tuy nhiên, đổi lại thì thời gian huấn luyện mô hình sẽ càng lớn. Còn nếu, tham số này càng lớn thì chi phí gán nhãn càng cao và chất lượng dữ liệu ở mỗi round có thể không tốt. Vì vậy, nên chọn một giá trị phù hợp trong khoảng từ **0.1% đến 1%** lượng dữ liệu có trong tập unlabeled.
 
-    -   **N_ROUNDS** cũng được chọn tùy thuộc vào thời gian training và khả năng gán nhãn của người dùng. Gọi **TOTAL_SAMPLES** là tổng lượng dữ liệu người dùng có thể gán nhãn thì **N_ROUNDS** được tính bằng công thức sau: **$$\text{N\_ROUNDS} = \frac{\text{TOTAL\_SAMPLES} - \text{N\_INIT\_LABELED}}{\text{N\_SAMPLES}} + 1$$**
+    -   **N_ROUNDS** cũng được chọn tùy thuộc vào thời gian training và khả năng gán nhãn của người dùng. Gọi **TOTAL_SAMPLES** là tổng lượng dữ liệu người dùng có thể gán nhãn thì **N_ROUNDS** được tính bằng công thức sau:
 
-=> Tóm lại, so với không sử dụng Active Learning (No AL), các chiến lược trên giúp mô hình đạt được độ chính xác tương đương hoặc cao hơn với lượng dữ liệu cần gán nhãn ít hơn, từ đó giảm chi phí và thời gian cho quá trình annotation.
+$$\verb|N_ROUNDS| = \frac{\verb|TOTAL_SAMPLES | - \verb| N_INIT_LABELED|}{\verb|N_SAMPLES|} + 1$$
+
+Tóm lại, so với không sử dụng Active Learning (No AL), các chiến lược trên giúp mô hình đạt được độ chính xác tương đương hoặc cao hơn với lượng dữ liệu cần gán nhãn ít hơn, từ đó giảm chi phí và thời gian cho quá trình annotation.
 
 ### Kết Luận và Hướng Phát Triển
 
