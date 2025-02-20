@@ -59,6 +59,15 @@ class Predictor():
         # Calculate time of prediction
         end = time.time()
 
+        # Get top 5 probabilities and indices
+        top5_probs, top5_indices = probabilities.sort(dim=1, descending=True)
+        top5_probs = top5_probs[0][:5]
+        top5_indices = top5_indices[0][:5]
+
+        # Print top 5 classes and probabilities
+        for i in range(5):
+            print(f"Class: {self.clas_index[str(top5_indices[i].item())]}, Probability: {top5_probs[i].item():.4f}")
+
         # Print prediction and probabilities
         print(f'Predict: {predicted_label}, Probability: {prob.item()}, Time Infer: {end - start:.4f}s')
 
@@ -68,7 +77,7 @@ class Predictor():
         img = img.clip(0, 1) # Giới hạn giá trị trong khoảng [0, 1]
         rcParams['font.family'] = 'Meiryo'
         plt.imshow(img)
-        plt.title(f'Predicted: {predicted_label}, Probability: {prob.item():.4f}')
+        plt.title(f'Predicted: {predicted_label}, Class Id: {class_id}, Probability: {prob.item():.4f}')
         plt.axis('off')
         plt.show()
 
