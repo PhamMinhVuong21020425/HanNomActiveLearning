@@ -1,10 +1,15 @@
-data
+data/*
 weights
 checkpoints
 wandb
 __pycache__
 .idea
 .vscode
+.cache
 .ipynb_checkpoints
 *.pth
 *.pyc
+*.log
+
+# files to be pushed to GitHub
+!data/wb_recognition_dataset.zip
