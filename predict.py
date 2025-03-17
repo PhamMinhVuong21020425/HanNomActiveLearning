@@ -54,27 +54,42 @@ class Predictor():
         self.model_classify = model_classify
         self.model_detect = model_detect
 
-    def classify(self, img):
-        # Load and preprocess the input image
+    def preprocess_image(self, img):
+        """Preprocess a image for classification."""
         if isinstance(img, np.ndarray):
             img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))  # Convert OpenCV BGR into RGB
         elif isinstance(img, str):
             img = Image.open(img).convert('RGB')
+        
+        return transform(img, phase='val').unsqueeze(0) # (1, C, H, W)
 
-        img_tensor = transform(img, phase='val').unsqueeze(0) # (channel, height, width) -> (1, channel, height, width)
+    def classify(self, imgs):
+        img_tensors = []
 
-        # Make a prediction
+        for img in imgs:
+            img_tensor = self.preprocess_image(img)
+            img_tensors.append(img_tensor)
+
+        if not img_tensors:
+            return []
+
+        batch_tensor = torch.cat(img_tensors).to(device)  # Stack into a batch
+
+        # Batch inference
         with torch.no_grad():
-            output = self.model_classify(img_tensor.to(device))
+            output = self.model_classify(batch_tensor)
 
         # Calculate probabilities using softmax
         probabilities = F.softmax(output, dim=1)
         prob, predict = torch.max(probabilities, 1) # torch.max return tuple (values, indices)
 
-        class_id = str(predict.item())
-        predicted_label = self.clas_index[class_id]
+        results = []
+        for i in range(len(imgs)):
+            class_id = str(predict[i].item())
+            predicted_label = self.clas_index[class_id]
+            results.append((class_id, predicted_label, prob[i].item()))
 
-        return class_id, predicted_label, prob.item()
+        return results
     
     def predict(
         self,   
@@ -162,6 +177,9 @@ class Predictor():
                     for c in det[:, -1].unique():
                         n = (det[:, -1] == c).sum()  # detections per class
                         s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    
+                    detections = []
+                    crops = []
 
                     # Process results
                     for *xyxy, conf, cls in reversed(det):
@@ -173,12 +191,8 @@ class Predictor():
                         }
 
                         x1, y1, x2, y2 = map(int, xyxy)
-
-                        if classify:
-                            img_crop = img_copy[y1:y2, x1:x2]
-                            class_id, predicted_label, prob = self.classify(img_crop)
-                            detection['class'] = class_id
-                            detection['name'] = predicted_label
+                        img_crop = img_copy[y1:y2, x1:x2]
+                        crops.append(img_crop)  # Collect cropped images for batch processing
 
                         detection['coordinates'] = [
                             {'x': x1, 'y': y1},
@@ -188,8 +202,8 @@ class Predictor():
                             {'x': x1, 'y': y1},
                         ]
 
-                        results.append(detection)
-                        
+                        detections.append(detection)
+
                         # Optional: Write to file
                         if save_txt:
                             # Make sure the labels directory exists
@@ -204,6 +218,15 @@ class Predictor():
                             # Add bbox to image
                             label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                             annotator.box_label(xyxy, label, color=colors(c, True))
+
+                    # Perform batch classification
+                    if classify and crops:
+                        batch_results = self.classify(crops)
+                        for detection, (class_id, predicted_label, prob) in zip(detections, batch_results):
+                            detection['class'] = class_id
+                            detection['name'] = predicted_label
+
+                    results.extend(detections)                   
                 
                 # Print time (inference-only)
                 print(f'{s}Done. ({t3 - t2:.3f}s)')

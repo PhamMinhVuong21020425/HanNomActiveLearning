@@ -41,7 +41,6 @@ def test():
     json_objects = predictor.predict(source, classify=False)
     return jsonify(json_objects)
 
-
 @app.route("/api/detect", methods=['POST'])
 @cross_origin()
 def object_detection():
@@ -72,7 +71,7 @@ def favicon():
     path = os.path.join(app.root_path, 'static')
     return send_from_directory(path, 'favicon.ico')
 
-ngrok.set_auth_token(os.environ.get('NGROK_AUTH_TOKEN'))
-url = ngrok.connect(os.environ.get('PORT', 5000)).public_url
-db.update({"server_url": url})
-print('Global NGROK URL:', url)
+# ngrok.set_auth_token(os.environ.get('NGROK_AUTH_TOKEN'))
+# url = ngrok.connect(os.environ.get('PORT', 5000)).public_url
+# db.update({"server_url": url})
+# print('Global NGROK URL:', url)
