@@ -25,13 +25,22 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = EfficientNetB7_Dropout(num_classes=2139)
 
 # prepare model
-model = load_model(model, f'{WEIGHT_DIR}/DropoutSampling_best.pth')
+model = load_model(model, f'{WEIGHT_DIR}/efficientnet_b7_last.pth')
 model.eval()
 
 # read json file
 with open(f'{DATA_DIR}/map/mapping.json', mode='r', encoding='utf-8') as file:
     class_index = json.load(file)
 
+    # print class index have duplicate value
+    cnt = 0
+    for key, value in class_index.items():
+        amount = list(class_index.values()).count(value)
+        if amount > 1:
+            cnt += 1
+            print(f'Class: {value}, Index: {key}, Amount: {amount}')
+    
+    print(f'Total duplicate class: {cnt}')
 
 class Predictor():
     def __init__(self, class_index):
