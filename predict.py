@@ -61,34 +61,52 @@ class Predictor():
         elif isinstance(img, str):
             img = Image.open(img).convert('RGB')
         
-        return transform(img, phase='val').unsqueeze(0) # (1, C, H, W)
+        return transform(img, phase='val').unsqueeze(0) # (C, H, W) -> (1, C, H, W)
 
-    def classify(self, imgs):
-        img_tensors = []
+    def classify_single(self, img):
+        # Load and preprocess the input image
+        img_tensor = self.preprocess_image(img).to(device)
 
-        for img in imgs:
-            img_tensor = self.preprocess_image(img)
-            img_tensors.append(img_tensor)
-
-        if not img_tensors:
-            return []
-
-        batch_tensor = torch.cat(img_tensors).to(device)  # Stack into a batch
-
-        # Batch inference
+        # Make a prediction
         with torch.no_grad():
-            output = self.model_classify(batch_tensor)
+            output = self.model_classify(img_tensor)
 
         # Calculate probabilities using softmax
         probabilities = F.softmax(output, dim=1)
         prob, predict = torch.max(probabilities, 1) # torch.max return tuple (values, indices)
 
+        class_id = str(predict.item())
+        predicted_label = self.clas_index[class_id]
+
+        return class_id, predicted_label, prob.item()
+    
+    def classify_batch(self, imgs):
+        """Classify a batch of cropped images at once"""
+        if not imgs:
+            return []
+        
+        batch_tensors = []
+        for img in imgs:
+            img_tensor = self.preprocess_image(img)
+            batch_tensors.append(img_tensor)
+        
+        # Stack all images into a batch
+        batch = torch.cat(batch_tensors).to(device)
+        
+        # Process all images in one forward pass
+        with torch.no_grad():
+            outputs = self.model_classify(batch)
+        
+        # Calculate probabilities using softmax
+        probabilities = F.softmax(outputs, dim=1)
+        probs, predicts = torch.max(probabilities, 1) # torch.max return tuple (values, indices)
+        
         results = []
         for i in range(len(imgs)):
-            class_id = str(predict[i].item())
+            class_id = str(predicts[i].item())
             predicted_label = self.clas_index[class_id]
-            results.append((class_id, predicted_label, prob[i].item()))
-
+            results.append((class_id, predicted_label, probs[i].item()))
+        
         return results
     
     def predict(
@@ -107,7 +125,8 @@ class Predictor():
         line_thickness=2,                  # bounding box thickness
         hide_labels=True,                  # hide labels
         hide_conf=False,                   # hide confidences
-        output_dir='runs/predict'          # output directory
+        output_dir='runs/predict',         # output directory
+        batch_size=32                      # batch size for classification
     ):
         device = select_device(device)
         half = device.type != 'cpu'  # half precision only on CUDA
@@ -135,7 +154,7 @@ class Predictor():
             model(torch.zeros(1, 3, *[img_size, img_size]).to(device).type_as(next(model.parameters())))  # warmup
         
         results = []
-        dt, seen = [0.0, 0.0, 0.0], 0
+        dt, seen = [0.0, 0.0, 0.0, 0.0], 0
         for path, img, im0s, vid_cap in dataset:
             t1 = time_sync()
             img_copy = im0s.copy()
@@ -177,12 +196,52 @@ class Predictor():
                     for c in det[:, -1].unique():
                         n = (det[:, -1] == c).sum()  # detections per class
                         s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
-                    
-                    detections = []
-                    crops = []
 
-                    # Process results
+                    # Batch classification
+                    t_class_start = time_sync()
+                    cropped_images = []
+                    detection_info = []
+                    
                     for *xyxy, conf, cls in reversed(det):
+                        # Convert tensor to list of integers
+                        x1, y1, x2, y2 = [int(coord.item()) for coord in xyxy]
+                        
+                        img_crop = img_copy[y1:y2, x1:x2]
+                        
+                        # Skip images that are too small to classify
+                        if img_crop.size == 0 or img_crop.shape[0] == 0 or img_crop.shape[1] == 0:
+                            continue
+                            
+                        cropped_images.append(img_crop)
+                        # Store detection info including the tensor xyxy for annotation
+                        detection_info.append({
+                            'xyxy': xyxy,  # Original tensor for annotation
+                            'box': [x1, y1, x2, y2],  # Integer coordinates
+                            'conf': conf.item(),
+                            'cls': cls.item()
+                        })
+                    
+                    # Batch classify all cropped images
+                    batch_results = []
+                    if classify and cropped_images:
+                        # Process in batches to avoid memory issues
+                        for i in range(0, len(cropped_images), batch_size):
+                            batch = cropped_images[i:i+batch_size]
+                            batch_results.extend(self.classify_batch(batch))
+                    
+                    t_class_end = time_sync()
+                    dt[3] += t_class_end - t_class_start
+                    
+                    # Process results after classification
+                    for i, det_info in enumerate(detection_info):
+                        if i >= len(batch_results) and classify:
+                            continue
+                        
+                        xyxy = det_info['xyxy']  # Original tensor
+                        x1, y1, x2, y2 = det_info['box']  # Integer coordinates
+                        conf = det_info['conf']
+                        cls = det_info['cls']
+                        
                         c = int(cls)
                         detection = {
                             'class': c,
@@ -190,9 +249,10 @@ class Predictor():
                             'confidence': float(conf),  # Confidence score
                         }
 
-                        x1, y1, x2, y2 = map(int, xyxy)
-                        img_crop = img_copy[y1:y2, x1:x2]
-                        crops.append(img_crop)  # Collect cropped images for batch processing
+                        if classify and i < len(batch_results):
+                            class_id, predicted_label, prob = batch_results[i]
+                            detection['class'] = class_id
+                            detection['name'] = predicted_label
 
                         detection['coordinates'] = [
                             {'x': x1, 'y': y1},
@@ -202,15 +262,15 @@ class Predictor():
                             {'x': x1, 'y': y1},
                         ]
 
-                        detections.append(detection)
-
+                        results.append(detection)
+                        
                         # Optional: Write to file
                         if save_txt:
                             # Make sure the labels directory exists
                             os.makedirs(os.path.dirname(txt_path), exist_ok=True)
                             # Convert bbox to xywh format and save
-                            xywh = ((xyxy[0] + xyxy[2]) / 2, (xyxy[1] + xyxy[3]) / 2,  # x center, y center
-                                xyxy[2] - xyxy[0], xyxy[3] - xyxy[1])  # width, height
+                            xywh = ((x1 + x2) / 2, (y1 + y2) / 2,  # x center, y center
+                                  x2 - x1, y2 - y1)  # width, height
                             with open(txt_path, 'a') as f:
                                 f.write(f"{c} {' '.join(f'{x:.6f}' for x in xywh)}\n")
                         
@@ -218,15 +278,6 @@ class Predictor():
                             # Add bbox to image
                             label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                             annotator.box_label(xyxy, label, color=colors(c, True))
-
-                    # Perform batch classification
-                    if classify and crops:
-                        batch_results = self.classify(crops)
-                        for detection, (class_id, predicted_label, prob) in zip(detections, batch_results):
-                            detection['class'] = class_id
-                            detection['name'] = predicted_label
-
-                    results.extend(detections)                   
                 
                 # Print time (inference-only)
                 print(f'{s}Done. ({t3 - t2:.3f}s)')
@@ -237,7 +288,7 @@ class Predictor():
         
         # Print results
         t = tuple(x / seen * 1E3 for x in dt)  # speeds per image
-        print(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *[img_size, img_size])}' % t)
+        print(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS, %.1fms classify per image at shape {(1, 3, *[img_size, img_size])}' % t)
         if save_txt or save_img:
             print(f"Results saved to {output_dir}")
 

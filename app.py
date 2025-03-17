@@ -52,7 +52,7 @@ def object_detection():
         file_path = os.path.join(UPLOAD_FOLDER, f'temp.{file.filename.split(".")[-1]}')
         file.save(file_path)
 
-        json_objects = predictor.predict(source=file_path, classify=True)
+        json_objects = predictor.predict(source=file_path, classify=True, batch_size=64)
         output.append({
             'objects_detection': json_objects,
             'url_image': os.path.join(UPLOAD_FOLDER, file.filename),
