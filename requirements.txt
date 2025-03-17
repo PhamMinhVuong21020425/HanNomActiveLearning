@@ -1,3 +1,4 @@
+# Base
 numpy
 torch
 torchvision
@@ -5,3 +6,15 @@ wandb
 tqdm
 pillow
 matplotlib
+opencv-python
+PyYAML
+requests
+scipy
+thop
+
+# Web app
+Flask
+Flask-Cors
+pyngrok
+Pyrebase4
+python-dotenv

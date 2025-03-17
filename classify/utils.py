@@ -3,9 +3,9 @@ import torch
 import matplotlib.pyplot as plt
 from typing import Type
 
-from hyperparams import *
-from config import device
-from models import EfficientNetB7_Dropout
+from classify.hyperparams import *
+from classify.config import device
+from classify.models import EfficientNetB7_Dropout
 
 from sampling_strategies import (
     BaseStrategy,

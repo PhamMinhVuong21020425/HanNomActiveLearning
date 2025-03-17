@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset, Subset
 
-from hyperparams import *
+from classify.hyperparams import *
 
 
 class SinoNomDataset(Dataset):

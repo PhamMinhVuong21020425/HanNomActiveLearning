@@ -7,7 +7,7 @@ import torch
 
 # Apply WanDB
 import wandb
-from hyperparams import *
+from classify.hyperparams import *
 
 # Set seed
 torch.manual_seed(SEED)

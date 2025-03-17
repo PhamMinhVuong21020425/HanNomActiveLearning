@@ -4,11 +4,11 @@ from torch import optim
 from torch.utils.data import DataLoader
 from typing import Type
 
-from transform import ImageTransform
-from dataset import SinoNomDataset, ActiveLearningDataset
-from models import ActiveLearningNet
-from config import *
-from utils import *
+from classify.transform import ImageTransform
+from classify.dataset import SinoNomDataset, ActiveLearningDataset
+from classify.models import ActiveLearningNet
+from classify.config import *
+from classify.utils import *
 
 
 torch.set_default_device(device)

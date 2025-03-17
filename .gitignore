@@ -1,6 +1,7 @@
 data/*
 weights
 checkpoints
+runs
 wandb
 __pycache__
 .idea
@@ -9,7 +10,13 @@ __pycache__
 .ipynb_checkpoints
 *.pth
 *.pyc
+*.pyo
+*.pyd
 *.log
+
+# web app
+uploads/*
+.env
 
 # files to be pushed to GitHub
 !data/wb_recognition_dataset.zip
