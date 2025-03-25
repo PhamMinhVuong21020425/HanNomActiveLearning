@@ -3,9 +3,9 @@ import torch
 import matplotlib.pyplot as plt
 from typing import Type
 
-from classify.hyperparams import *
-from classify.config import device
-from classify.models import EfficientNetB7_Dropout
+from .hyperparams import *
+from .config import device
+from .models import EfficientNetB7_Dropout
 
 from sampling_strategies import (
     BaseStrategy,
@@ -16,6 +16,7 @@ from sampling_strategies import (
     RatioSampling,
     DropoutSampling,
     BALDSampling,
+    BatchBALDSampling,
 )
 
 
@@ -57,6 +58,7 @@ def get_strategy(name: str) -> Type[BaseStrategy]:
         "LeastConfidenceSampling": LeastConfidenceSampling,
         "DropoutSampling": DropoutSampling,
         "BALDSampling": BALDSampling,
+        "BatchBALDSampling": BatchBALDSampling,
     }
 
     strategy = strategies.get(name)

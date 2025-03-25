@@ -1,8 +1,16 @@
+# Run by command: python classify/train.py or python -m classify.train
+import sys
+from pathlib import Path
 import torch
 import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 from typing import Type
+
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]  # active-learning root directory
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
 
 from classify.transform import ImageTransform
 from classify.dataset import SinoNomDataset, ActiveLearningDataset
@@ -15,13 +23,14 @@ torch.set_default_device(device)
 print(f'Using device: {device}')
 
 strategy_names = [
-    "RandomSampling",
+    # "RandomSampling",
     # "LeastConfidenceSampling",
-    "MarginSampling",
+    # "MarginSampling",
     # "EntropySampling",
     # "RatioSampling",
     # "DropoutSampling",
     # "BALDSampling",
+    "BatchBALDSampling",
 ]
 
 

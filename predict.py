@@ -41,7 +41,7 @@ model_classify = load_model(model_classify, f'{WEIGHT_DIR}/efficientnet_b7_last.
 model_classify.to(device).eval()
 
 # load model detect
-model_detect = attempt_load(weights=f'{WEIGHT_DIR}/yolov5_best.pt', map_location=device)
+model_detect = attempt_load(weights=f'{WEIGHT_DIR}/yolov5m_best.pt', map_location=device)
 
 # read json file
 with open(f'{DATA_DIR}/map/mapping.json', mode='r', encoding='utf-8') as file:
@@ -253,6 +253,7 @@ class Predictor():
                             class_id, predicted_label, prob = batch_results[i]
                             detection['class'] = class_id
                             detection['name'] = predicted_label
+                            detection['confidence'] = (detection['confidence'] * 2 + prob) / 3
 
                         detection['coordinates'] = [
                             {'x': x1, 'y': y1},
@@ -262,7 +263,8 @@ class Predictor():
                             {'x': x1, 'y': y1},
                         ]
 
-                        results.append(detection)
+                        if detection['confidence'] > 0.25:
+                            results.append(detection)
                         
                         # Optional: Write to file
                         if save_txt:

@@ -1,3 +1,6 @@
+# In this case, just configure for testing on CPU
+# In reality, these parameters need to be configured appropriately
+
 # Paths
 HOME = '.'
 DATA_DIR = f'{HOME}/data/wb_recognition_dataset'
@@ -5,17 +8,17 @@ WEIGHT_DIR = f'{HOME}/weights'
 
 # Hyperparams
 SEED = 2025
-DEVICE = "cuda"
+DEVICE = "cpu"
 N_ROUNDS = 2
 N_EPOCHS = 3
-N_INFER = 3
+N_INFER = 2
 N_SAMPLES = 50
 BATCH_SIZE = 16
 TRAIN_BATCH = 32
-VAL_BATCH = 32
+VAL_BATCH = 64
 PREDICT_BATCH = 64
 N_INIT_LABELED = 50
-N_SAMPLES_PREDICT = 1000
+N_SAMPLES_PREDICT = 200
 
 # For optimizer
 LEARNING_RATE = 0.001

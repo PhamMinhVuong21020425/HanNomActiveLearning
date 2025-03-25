@@ -6,3 +6,4 @@ from .ratio_sampling import RatioSampling
 from .entropy_sampling import EntropySampling
 from .dropout_sampling import DropoutSampling
 from .bald_sampling import BALDSampling
+from .batch_bald_sampling import BatchBALDSampling

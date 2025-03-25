@@ -7,8 +7,8 @@ from torchvision import models
 from torchvision.models import EfficientNet_B7_Weights
 from tqdm import tqdm
 
-from classify.hyperparams import *
-from classify.config import device
+from .hyperparams import *
+from .config import device
 
 class ActiveLearningNet:
     def __init__(self, model, device, criterion, optimizer_cls, optimizer_params):
