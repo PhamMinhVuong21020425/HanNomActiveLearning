@@ -5,6 +5,7 @@ from .base_strategy import BaseStrategy
 class BALDSampling(BaseStrategy):
     def __init__(self, dataset, net):
         super(BALDSampling, self).__init__(dataset, net)
+        
     def query(self, n):
         unlabeled_idxs, unlabeled_data = self.dataset.get_unlabeled_data()
         probs = self.predict_prob_bald(unlabeled_data) # torch.Size([N_INFER, N_UNLABELED_DATA, N_CLASS])
