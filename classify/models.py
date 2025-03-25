@@ -74,26 +74,43 @@ class ActiveLearningNet:
                 _, preds = outputs.max(1)
                 predictions.append(preds)
                 
-        return torch.cat(predictions).cpu()
+        return torch.cat(predictions)
     
     def predict_prob(self, data):
         self.model.eval()
-        dataloader = DataLoader(data, batch_size=PREDICT_BATCH, shuffle=False, generator=torch.Generator(device=device))
-        probabilities = []
+        dataloader = DataLoader(
+            data,
+            batch_size=PREDICT_BATCH,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=N_WORKERS,
+            generator=torch.Generator(device=device)
+        )
+        
+        # Pre-allocate a list with approximate capacity to avoid resizing
+        probabilities = [None] * len(dataloader)
         
         with torch.no_grad():
-            for inputs, _ in tqdm(dataloader, desc='Predicting unlabeled data...'):
+            for i, (inputs, _) in enumerate(tqdm(dataloader, desc='Predicting unlabeled data...')):
+                # Move inputs to device and use non_blocking for asynchronous transfer
                 inputs = inputs.to(self.device, non_blocking=True)
                 outputs = self.model(inputs)
                 probs = F.softmax(outputs, dim=1)
-                probabilities.append(probs)
+                probabilities[i] = probs
                 
-        return torch.cat(probabilities).cpu()
+        return torch.cat(probabilities)
     
     def predict_prob_dropout(self, data, n_infer=N_INFER):
         # Use dropout in inference
         self.model.train()
-        dataloader = DataLoader(data, batch_size=PREDICT_BATCH, shuffle=False, generator=torch.Generator(device=device))
+        dataloader = DataLoader(
+            data,
+            batch_size=PREDICT_BATCH,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=N_WORKERS,
+            generator=torch.Generator(device=device)
+        )
 
         # Initialize probabilities tensor with proper shape
         sample_input = next(iter(dataloader))[0][:1].to(self.device)
@@ -116,33 +133,44 @@ class ActiveLearningNet:
 
         # Average the probabilities across all inference passes
         probabilities /= n_infer
-        return probabilities.cpu()
+        return probabilities
 
     def predict_prob_bald(self, data, n_infer=N_INFER):
         # Use dropout in inference
         self.model.train()
-        dataloader = DataLoader(data, batch_size=PREDICT_BATCH, shuffle=False, generator=torch.Generator(device=device))
+        dataloader = DataLoader(
+            data,
+            batch_size=PREDICT_BATCH,
+            shuffle=False,
+            pin_memory=True,
+            num_workers=N_WORKERS,
+            generator=torch.Generator(device=device)
+        )
 
         # Initialize probabilities tensor with proper shape for BALD
         sample_input = next(iter(dataloader))[0][:1].to(self.device)
         num_classes = self.model(sample_input).shape[1]
-        probabilities = torch.zeros([n_infer, len(data), num_classes]).to(self.device)
+        probabilities = torch.zeros([n_infer, len(data), num_classes], device=self.device)
     
         # Perform multiple inference passes with dropout
         for i in tqdm(range(n_infer), desc='Predicting unlabeled data...'):
-            batch_probs = []
+            batch_idx = 0
             with torch.no_grad():
                 for inputs, _ in dataloader:
                     inputs = inputs.to(self.device, non_blocking=True)
                     outputs = self.model(inputs)
                     probs = F.softmax(outputs, dim=1)
-                    batch_probs.append(probs)
 
-            # Store probabilities for this inference pass
-            probabilities[i] = torch.cat(batch_probs)
+                    # Calculate batch size and indices
+                    batch_size = inputs.size(0)
+                    start_idx = batch_idx * PREDICT_BATCH
+                    end_idx = min(start_idx + batch_size, len(data))
+                    
+                    # Store directly into the pre-allocated tensor
+                    probabilities[i, start_idx:end_idx] = probs
+                    batch_idx += 1
 
-        return probabilities.cpu()
-
+        return probabilities
 
 class EfficientNetB7_Dropout(nn.Module):
     def __init__(self, num_classes, dropout_rates=[0.0, 0.1, 0.3, 0.4]):
