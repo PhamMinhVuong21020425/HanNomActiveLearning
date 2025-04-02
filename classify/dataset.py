@@ -26,7 +26,7 @@ class SinoNomDataset(Dataset):
         return image, label
 
 class ActiveLearningDataset:
-    def __init__(self, dataset, initial_labeled=2000):
+    def __init__(self, dataset: SinoNomDataset, initial_labeled=2000):
         self.dataset = dataset
         self.n_samples = len(dataset)
         self.labeled_idxs = np.zeros(self.n_samples, dtype=bool)

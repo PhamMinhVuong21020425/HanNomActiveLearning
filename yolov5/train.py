@@ -42,12 +42,9 @@ from utils.general import labels_to_class_weights, increment_path, labels_to_ima
     check_file, check_yaml, check_suffix, print_args, print_mutation, set_logging, one_cycle, colorstr, methods
 from utils.downloads import attempt_download
 from utils.loss import ComputeLoss
-from utils.plots import plot_labels, plot_evolve
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, intersect_dicts, select_device, \
     torch_distributed_zero_first
-from utils.loggers.wandb.wandb_utils import check_wandb_resume
 from utils.metrics import fitness
-from utils.loggers import Loggers
 from utils.callbacks import Callbacks
 
 LOGGER = logging.getLogger(__name__)
@@ -83,18 +80,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         yaml.safe_dump(vars(opt), f, sort_keys=False)
     data_dict = None
 
-    # Loggers
-    if RANK in [-1, 0]:
-        loggers = Loggers(save_dir, weights, opt, hyp, LOGGER)  # loggers instance
-        if loggers.wandb:
-            data_dict = loggers.wandb.data_dict
-            if resume:
-                weights, epochs, hyp = opt.weights, opt.epochs, opt.hyp
-
-        # Register actions
-        for k in methods(loggers):
-            callbacks.register_action(k, callback=getattr(loggers, k))
-
     # Config
     plots = not evolve  # create plots
     cuda = device.type != 'cpu'
@@ -113,7 +98,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     if pretrained:
         with torch_distributed_zero_first(LOCAL_RANK):
             weights = attempt_download(weights)  # download if not found locally
-        ckpt = torch.load(weights, map_location=device)  # load checkpoint
+        ckpt = torch.load(weights, map_location=device, weights_only=False)  # load checkpoint
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
@@ -223,12 +208,10 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                        prefix=colorstr('val: '))[0]
 
         if not resume:
-            labels = np.concatenate(dataset.labels, 0)
+            # labels = np.concatenate(dataset.labels, 0)
             # c = torch.tensor(labels[:, 0])  # classes
             # cf = torch.bincount(c.long(), minlength=nc) + 1.  # frequency
             # model._initialize_biases(cf.to(device))
-            if plots:
-                plot_labels(labels, names, save_dir)
 
             # Anchors
             if not opt.noautoanchor:
@@ -376,7 +359,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                         'ema': deepcopy(ema.ema).half(),
                         'updates': ema.updates,
                         'optimizer': optimizer.state_dict(),
-                        'wandb_id': loggers.wandb.wandb_run.id if loggers.wandb else None}
+                        }
 
                 # Save last, best and delete
                 torch.save(ckpt, last)
@@ -485,7 +468,7 @@ def main(opt, callbacks=Callbacks()):
         check_requirements(exclude=['thop'])
 
     # Resume
-    if opt.resume and not check_wandb_resume(opt) and not opt.evolve:  # resume an interrupted run
+    if opt.resume and not opt.evolve:  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml', errors='ignore') as f:
@@ -514,11 +497,20 @@ def main(opt, callbacks=Callbacks()):
 
     # Train
     if not opt.evolve:
-        train(opt.hyp, opt, device, callbacks)
+        results = train(opt.hyp, opt, device, callbacks)
         if WORLD_SIZE > 1 and RANK == 0:
             LOGGER.info('Destroying process group... ')
             dist.destroy_process_group()
 
+        if results:
+            metrics = {
+                "mAP@50": results[0],
+                "mAP@50-95": results[1],
+                "Precision": results[2],
+                "Recall": results[3]
+            }
+            return metrics, opt.save_dir
+        
     # Evolve hyperparameters (optional)
     else:
         # Hyperparameter evolution metadata (mutation scale 0-1, lower_limit, upper_limit)
@@ -601,7 +593,6 @@ def main(opt, callbacks=Callbacks()):
             print_mutation(results, hyp.copy(), save_dir, opt.bucket)
 
         # Plot results
-        plot_evolve(evolve_csv)
         print(f'Hyperparameter evolution finished\n'
               f"Results saved to {colorstr('bold', save_dir)}\n"
               f'Use best hyperparameters example: $ python train.py --hyp {evolve_yaml}')

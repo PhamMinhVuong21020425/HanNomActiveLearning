@@ -82,8 +82,7 @@ class BatchBALDSampling(BaseStrategy):
                 best_indices.append(best_index)
                 remaining_indices.remove(best_index)
 
-            print ("Best index: ", best_index)
-            print(f"Selected sample {i+1}/{n}, score: {max_mutual_info.item():.4f}")
+            print(f"Selected sample {i+1}/{n}, best index: {best_index}, score: {max_mutual_info.item():.4f}")
 
         # Convert subpool indices back to original unlabeled indices
         if len(unlabeled_idxs) > self.num_sub_pool:

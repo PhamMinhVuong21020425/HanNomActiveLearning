@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
-from typing import Type
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # active-learning root directory
@@ -58,7 +57,7 @@ dataloader_dict = {
 }
 
 
-def train_active_learning(strategy: Type[BaseStrategy], n_rounds=N_ROUNDS, n_samples=N_SAMPLES):
+def train_active_learning(strategy: BaseStrategy, n_rounds=N_ROUNDS, n_samples=N_SAMPLES):
     accuracies = []
     strategy_name = strategy.__class__.__name__
     

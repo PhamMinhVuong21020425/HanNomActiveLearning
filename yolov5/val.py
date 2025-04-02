@@ -11,7 +11,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from threading import Thread
 
 import numpy as np
 import torch
@@ -29,7 +28,6 @@ from utils.general import coco80_to_coco91_class, check_dataset, check_img_size,
     check_suffix, check_yaml, box_iou, non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, \
     increment_path, colorstr, print_args
 from utils.metrics import ap_per_class, ConfusionMatrix
-from utils.plots import output_to_target, plot_images, plot_val_study
 from utils.torch_utils import select_device, time_sync
 from utils.callbacks import Callbacks
 
@@ -223,13 +221,6 @@ def run(data,
                 save_one_json(predn, jdict, path, class_map)  # append to COCO-JSON dictionary
             callbacks.run('on_val_image_end', pred, predn, path, names, img[si])
 
-        # Plot images
-        if plots and batch_i < 3:
-            f = save_dir / f'val_batch{batch_i}_labels.jpg'  # labels
-            Thread(target=plot_images, args=(img, targets, paths, f, names), daemon=True).start()
-            f = save_dir / f'val_batch{batch_i}_pred.jpg'  # predictions
-            Thread(target=plot_images, args=(img, output_to_target(out), paths, f, names), daemon=True).start()
-
     # Compute statistics
     stats = [np.concatenate(x, 0) for x in zip(*stats)]  # to numpy
     if len(stats) and stats[0].any():
@@ -352,7 +343,6 @@ def main(opt):
                 y.append(r + t)  # results and times
             np.savetxt(f, y, fmt='%10.4g')  # save
         os.system('zip -r study.zip study_*.txt')
-        plot_val_study(x=x)  # plot
 
 
 if __name__ == "__main__":

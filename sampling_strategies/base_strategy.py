@@ -1,5 +1,8 @@
+from classify.dataset import ActiveLearningDataset
+from classify.models import ActiveLearningNet
+
 class BaseStrategy:
-    def __init__(self, dataset, net):
+    def __init__(self, dataset: ActiveLearningDataset, net: ActiveLearningNet):
         self.dataset = dataset
         self.net = net
 
