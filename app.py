@@ -496,7 +496,7 @@ def train_classification():
             "traceback": str(sys.exc_info())
         }), 500
 
-# ngrok.set_auth_token(os.environ.get('NGROK_AUTH_TOKEN'))
-# url = ngrok.connect(os.environ.get('PORT', 5000)).public_url
-# db.update({"server_url": url})
-# print('Global NGROK URL:', url)
+ngrok.set_auth_token(os.environ.get('NGROK_AUTH_TOKEN'))
+url = ngrok.connect(os.environ.get('PORT', 5000)).public_url
+db.update({"server_url": url})
+print('Global NGROK URL:', url)

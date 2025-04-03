@@ -18,6 +18,11 @@ os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 os.environ["WANDB_API_KEY"] = WANDB_KEY
 os.environ["WANDB_BASE_URL"] = WANDB_HOST
 
+# Limit CPU threads
+num_threads = torch.get_num_threads()
+torch.set_num_threads(num_threads)
+torch.set_num_interop_threads(num_threads)
+
 # Login wandb
 if wandb.api.api_key is None:
     wandb.login()

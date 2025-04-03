@@ -37,14 +37,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model_classify = EfficientNetB7_Dropout(num_classes=2139)
 
 # prepare model classify
-model_classify = load_model(model_classify, f'{WEIGHT_DIR}/efficientnet_b7_last.pth')
+model_classify = load_model(model_classify, f'{KAGGLE_DIR}/efficientnet_b7_best.pth')
 model_classify.to(device).eval()
 
 # load model detect
 model_detect = attempt_load(weights=f'{WEIGHT_DIR}/yolov5m_best.pt', map_location=device)
 
 # read json file
-with open(f'{DATA_DIR}/map/mapping.json', mode='r', encoding='utf-8') as file:
+with open(f'{HOME}/classify/mapping.json', mode='r', encoding='utf-8') as file:
     class_index = json.load(file)
 
 

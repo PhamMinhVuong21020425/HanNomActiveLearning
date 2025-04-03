@@ -1,6 +1,6 @@
 data/*
+weights/*
 datasets
-weights
 checkpoints
 runs
 wandb
@@ -21,3 +21,4 @@ uploads/*
 
 # files to be pushed to GitHub
 !data/wb_recognition_dataset.zip
+!weights/yolov5m_best.pt
