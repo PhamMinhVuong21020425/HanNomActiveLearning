@@ -84,7 +84,6 @@ class ActiveLearningNet:
             shuffle=False,
             pin_memory=True,
             num_workers=N_WORKERS,
-            generator=torch.Generator(device=device)
         )
         
         # Pre-allocate a list with approximate capacity to avoid resizing
@@ -109,7 +108,6 @@ class ActiveLearningNet:
             shuffle=False,
             pin_memory=True,
             num_workers=N_WORKERS,
-            generator=torch.Generator(device=device)
         )
 
         # Initialize probabilities tensor with proper shape
@@ -144,7 +142,6 @@ class ActiveLearningNet:
             shuffle=False,
             pin_memory=True,
             num_workers=N_WORKERS,
-            generator=torch.Generator(device=device)
         )
 
         # Initialize probabilities tensor with proper shape for BALD

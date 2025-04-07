@@ -24,7 +24,7 @@ N_SAMPLES_PREDICT = 200
 # For optimizer
 LEARNING_RATE = 0.001
 MOMENTUM = 0.9
-N_WORKERS = 4
+N_WORKERS = 0
 
 # For WanDB
 WANDB_PROJECT = "EfficientNetB7 Dropout Active Learning"

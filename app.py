@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import yaml
+import datetime
 import zipfile
 import shutil
 import random
@@ -129,8 +130,7 @@ def object_detection():
 def image_classification():
     start = time.time()
     img = request.files["img"]
-
-
+    
     img_path = os.path.join(UPLOAD_FOLDER, f'temp.{img.filename.split(".")[-1]}')
     img.save(img_path)
 
@@ -156,14 +156,15 @@ def active_learning():
         
         # Validate and extract parameters
         strategy_name = data.get('strategy')
-        n_samples = data.get('n_samples')
+        n_samples = int(data.get('n_samples'))
         model_infer = data.get('modelInference')
         
         # Validate strategy
         if strategy_name not in strategy_names:
             return jsonify({
-                "error": f"Invalid strategy. Supported strategies are: {strategy_names}"
-            }), 400
+                "status": "error",
+                "message": f"Invalid strategy. Supported strategies are: {strategy_names}"
+            }), 200
         
         pool = request.files['pool']
         pool_name = data.get('poolName')
@@ -172,7 +173,7 @@ def active_learning():
         print("Received pool ZIP file:", pool.filename)
 
         # Unzip the pool data
-        extract_path = os.path.join(DATASET_FOLDER, pool_name, 'train', 'unlabeled')
+        extract_path = os.path.join(DATASET_FOLDER, pool_name, 'train', '0')
         os.makedirs(extract_path, exist_ok=True)
         
         with zipfile.ZipFile(pool_path, 'r') as zip_ref:
@@ -219,27 +220,23 @@ def active_learning():
         strategy.dataset.label_samples(query_indices)
 
         # Get list path of labeled and unlabeled data
-        labeled_indices, _ = strategy.dataset.get_labeled_data()
-        labeled_images = [dataset.file_list[i] for i in labeled_indices]
-
-        # Save labeled images to a new directory
-        labeled_dir = os.path.join(DATASET_FOLDER, 'labeled_images')
-        os.makedirs(labeled_dir, exist_ok=True)
-        for img_path in labeled_images:
-            shutil.copy(img_path, labeled_dir)
-        
-        print(f"[*] Labeled images saved to {labeled_dir}")
+        labeled_idxs, _ = strategy.dataset.get_labeled_data()
+        labeled_images = [dataset.file_list[int(i)] for i in labeled_idxs]
 
         # Zip the labeled images for download
-        zip_file_path = os.path.join(DATASET_FOLDER, 'labeled_images.zip')
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_file_path = os.path.join(DATASET_FOLDER, f'labeled_images_{timestamp}.zip')
+
         with zipfile.ZipFile(zip_file_path, 'w') as zipf:
-            for root, _, files in os.walk(labeled_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    zipf.write(file_path, os.path.relpath(file_path, labeled_dir))
+            for img_path in labeled_images:
+                filename = os.path.basename(img_path)
+                zipf.write(img_path, filename)
+
+        print(f"[*] Labeled images saved to {zip_file_path}")
 
         return jsonify({
-            "status": "Active Learning Training Completed",
+            "status": "success",
+            "message": "Active Learning Completed",
             "strategy": strategy_name,
             "samples": n_samples,
             "labeled_images_path": zip_file_path,
@@ -247,9 +244,10 @@ def active_learning():
     
     except Exception as e:
         return jsonify({
-            "error": str(e),
+            "status": "error",
+            "message": str(e),
             "traceback": str(sys.exc_info())
-        }), 500
+        }), 200
 
 def create_yaml_config(dataset_name, num_classes, class_names, train_path, val_path):
     """
@@ -368,6 +366,7 @@ def train_detection():
         
         return jsonify({
             "status": "success",
+            "message": f"Training completed successfully after {training_time:.2f} seconds.",
             "training_time": training_time,
             "results": metrics,
             "best_model_path": best_model_path
