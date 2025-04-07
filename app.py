@@ -124,31 +124,40 @@ def object_detection():
     print(f"Time taken: {end - start:.3f}s")
     return jsonify(output)
 
+@app.route("/api/classify", methods=['POST'])
+@cross_origin()
+def image_classification():
+    start = time.time()
+    img = request.files["img"]
+
+
+    img_path = os.path.join(UPLOAD_FOLDER, f'temp.{img.filename.split(".")[-1]}')
+    img.save(img_path)
+
+    class_id, predicted_label, confidence = predictor.classify_single(img_path)
+
+    # Remove image after processing
+    os.remove(img_path)
+
+    end = time.time()
+    print(f"Time taken: {end - start:.3f}s")
+    return jsonify({
+        "class_id": class_id,
+        "predicted_label": predicted_label,
+        "confidence": confidence,
+    })
+
 @app.route("/api/active-learning", methods=['POST'])
 @cross_origin()
 def active_learning():
-    """
-    API endpoint for training a model using active learning strategies
-    
-    Expected JSON payload:
-    {
-        "strategy": "BatchBALDSampling",  # Active learning strategy
-        "n_samples": 100,  # Samples to query
-        "model_type": "classification",  # Model type (classification or detection)
-        "model_path": "/path/to/model.pth",  # Optional model path
-        "dataset_path": "/path/to/dataset",  # Optional custom dataset path
-    }
-    """
     try:
         # Parse request parameters with defaults
-        data = request.get_json() or {}
+        data = request.form.to_dict()
         
         # Validate and extract parameters
-        strategy_name = data.get('strategy', 'BatchBALDSampling')
-        n_samples = data.get('n_samples', N_SAMPLES)
-        model_type = data.get('model_type', 'classification')
-        model_path = data.get('model_path', None)
-        dataset_path = data.get('dataset_path', DATA_DIR)
+        strategy_name = data.get('strategy')
+        n_samples = data.get('n_samples')
+        model_infer = data.get('modelInference')
         
         # Validate strategy
         if strategy_name not in strategy_names:
@@ -156,61 +165,85 @@ def active_learning():
                 "error": f"Invalid strategy. Supported strategies are: {strategy_names}"
             }), 400
         
-        # Handle different model types
-        if model_type.lower() == 'classification':
-            # Use existing classification training approach
-            data_list = get_image_paths(dataset_path, phase='train')
-            
-            # Create datasets
-            dataset = SinoNomDataset(data_list, transform=transform, phase='train')
-            
-            # Create active learning dataset
-            al_dataset = ActiveLearningDataset(dataset, initial_labeled=0)
-            
-            # Initialize model and active learning components
-            net = ActiveLearningNet(
-                model=load_model(get_model(), model_path),
-                device=device,
-                criterion=nn.CrossEntropyLoss(),
-                optimizer_cls=optim.AdamW,
-                optimizer_params={
-                    "lr": LEARNING_RATE, 
-                    "betas": (0.9, 0.999), 
-                    "eps": 1e-8, 
-                    "weight_decay": 0.0
-                },
-            )
-            
-            # Get the specified strategy
-            strategy = get_strategy(strategy_name)(al_dataset, net)
-            
-            # Get images need to label using active learning
-            query_indices = strategy.query(n_samples)
-            strategy.dataset.label_samples(query_indices)
+        pool = request.files['pool']
+        pool_name = data.get('poolName')
+        pool_path = os.path.join(DATASET_FOLDER, pool.filename)
+        pool.save(pool_path)
+        print("Received pool ZIP file:", pool.filename)
 
-            # Get list path of labeled and unlabeled data
-            labeled_indices, _ = strategy.dataset.get_labeled_data()
-            labeled_images = [dataset.file_list[i] for i in labeled_indices]
+        # Unzip the pool data
+        extract_path = os.path.join(DATASET_FOLDER, pool_name, 'train', 'unlabeled')
+        os.makedirs(extract_path, exist_ok=True)
+        
+        with zipfile.ZipFile(pool_path, 'r') as zip_ref:
+            for member in zip_ref.infolist():
+                filename = member.filename
+                ext = filename.split('.')[-1].lower()
+                if ext in {'jpg', 'jpeg', 'png'}:
+                    with zip_ref.open(member) as source, open(os.path.join(extract_path, os.path.basename(filename)), 'wb') as target:
+                        target.write(source.read())
 
-            return jsonify({
-                "status": "Active Learning Training Completed",
-                "model_type": model_type,
-                "strategy": strategy_name,
-                "samples": n_samples,
-                "labeled_images": labeled_images
-            }), 200
+        # Remove temporary files
+        os.remove(pool_path)
+        print(f"[*] Unzipped pool data to {extract_path}")
+
+        # Use existing classification training approach
+        data_path = os.path.join(DATASET_FOLDER, pool_name)
+        data_list = get_image_paths(data_path, phase='train')
         
-        elif model_type.lower() == 'detection':
-            # Placeholder for detection model active learning 
-            # You would need to implement detection-specific active learning logic
-            return jsonify({
-                "error": "Detection model active learning not implemented"
-            }), 501
+        # Create datasets
+        dataset = SinoNomDataset(data_list, transform=transform, phase='train')
         
-        else:
-            return jsonify({
-                "error": f"Unsupported model type: {model_type}"
-            }), 400
+        # Create active learning dataset
+        al_dataset = ActiveLearningDataset(dataset, initial_labeled=0)
+        
+        # Initialize model and active learning components
+        net = ActiveLearningNet(
+            model=load_model(get_model(), f'{KAGGLE_DIR}/efficientnet_b7_best.pth'),
+            device=device,
+            criterion=nn.CrossEntropyLoss(),
+            optimizer_cls=optim.AdamW,
+            optimizer_params={
+                "lr": LEARNING_RATE, 
+                "betas": (0.9, 0.999), 
+                "eps": 1e-9, 
+                "weight_decay": 0.0
+            },
+        )
+        
+        # Get the specified strategy
+        strategy = get_strategy(strategy_name)(al_dataset, net)
+        
+        # Get images need to label using active learning
+        query_indices = strategy.query(n_samples)
+        strategy.dataset.label_samples(query_indices)
+
+        # Get list path of labeled and unlabeled data
+        labeled_indices, _ = strategy.dataset.get_labeled_data()
+        labeled_images = [dataset.file_list[i] for i in labeled_indices]
+
+        # Save labeled images to a new directory
+        labeled_dir = os.path.join(DATASET_FOLDER, 'labeled_images')
+        os.makedirs(labeled_dir, exist_ok=True)
+        for img_path in labeled_images:
+            shutil.copy(img_path, labeled_dir)
+        
+        print(f"[*] Labeled images saved to {labeled_dir}")
+
+        # Zip the labeled images for download
+        zip_file_path = os.path.join(DATASET_FOLDER, 'labeled_images.zip')
+        with zipfile.ZipFile(zip_file_path, 'w') as zipf:
+            for root, _, files in os.walk(labeled_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    zipf.write(file_path, os.path.relpath(file_path, labeled_dir))
+
+        return jsonify({
+            "status": "Active Learning Training Completed",
+            "strategy": strategy_name,
+            "samples": n_samples,
+            "labeled_images_path": zip_file_path,
+        }), 200
     
     except Exception as e:
         return jsonify({
@@ -300,7 +333,7 @@ def train_detection():
                 shutil.move(label, os.path.join(label_dest, os.path.basename(label)))
             shutil.move(image, os.path.join(image_dest, os.path.basename(image)))
     
-    # Di chuyển file vào thư mục tương ứng
+    # Move files to the respective directories
     move_files(train_images, train_image_dir, train_label_dir)
     move_files(val_images, val_image_dir, val_label_dir)
     
