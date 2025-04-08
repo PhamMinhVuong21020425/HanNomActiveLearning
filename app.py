@@ -6,6 +6,7 @@
 # Import Libraries 
 import os
 import sys
+import json
 import time
 import yaml
 import datetime
@@ -16,6 +17,7 @@ import torch
 import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
+from typing import Literal
 from tqdm import tqdm
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS, cross_origin 
@@ -40,6 +42,12 @@ mean = [0.485, 0.456, 0.406]
 std = [0.229, 0.224, 0.225]
 
 transform = ImageTransform(resize, mean, std)
+
+# read json file
+with open(f'{HOME}/classify/mapping.json', mode='r', encoding='utf-8') as file:
+    class_index = json.load(file)
+    label_to_index = {v: k for k, v in class_index.items()}
+    existing_labels = set(class_index.values())
 
 # Active learning strategies
 strategy_names = [
@@ -77,21 +85,6 @@ def home():
 def favicon():
     path = os.path.join(app.root_path, 'static')
     return send_from_directory(path, 'favicon.ico')
-
-@app.route('/train', methods=['POST'])
-def train_model():
-    file = request.files['dataset']
-    file.save(f"./uploads/{file.filename}")
-    print("Received ZIP file:", file.filename)
-
-    data = request.form.to_dict()
-    print(f"[*] Training model {data['modelName']} with params: {data['epochs']}, {data['batchSize']}")
-
-    time.sleep(6)
-    
-    result = {"status": "completed", "accuracy": 0.95, "taskId": data['id']}
-    print(f"[✔] Training done for task {data['id']}")
-    return jsonify(result)
 
 @app.route("/test", methods=['GET'])
 @cross_origin()
@@ -236,7 +229,7 @@ def active_learning():
 
         return jsonify({
             "status": "success",
-            "message": "Active Learning Completed",
+            "message": f"Active Learning with {strategy_name} completed successfully.",
             "strategy": strategy_name,
             "samples": n_samples,
             "labeled_images_path": zip_file_path,
@@ -366,7 +359,7 @@ def train_detection():
         
         return jsonify({
             "status": "success",
-            "message": f"Training completed successfully after {training_time:.2f} seconds.",
+            "message": f"Detection training completed successfully after {training_time:.2f} seconds.",
             "training_time": training_time,
             "results": metrics,
             "best_model_path": best_model_path
@@ -381,39 +374,89 @@ def train_detection():
 @app.route("/api/train/classification", methods=['POST'])
 @cross_origin()
 def train_classification():
-    """
-    API endpoint for traditional (non-active learning) classification training
-    
-    Expected JSON payload:
-    {
-        "model": "EfficientNetB7",  # Model architecture
-        "dataset_path": "/path/to/dataset",  # Path to dataset
-        "train_params": {
-            "learning_rate": 1e-4,
-            "batch_size": 32,
-            "epochs": 50,
-            "optimizer": "AdamW"
-        }
-    }
-    """
     try:
-        # Parse request parameters
-        data = request.get_json() or {}
+        # Start time for training
+        start_time = time.time()
+
+        # Get training parameters from form data
+        data = request.form.to_dict()
+        model_name = data.get('modelName').replace(' ', '_').lower()
+        pretrained_model = data.get('pretrainedModel', './weights/efficientnet_b7_last.pth')
         
-        # Extract parameters with defaults
-        model_name = data.get('model', 'EfficientNetB7')
-        dataset_path = data.get('dataset_path', DATA_DIR)
+        # Get dataset file from request
+        dataset = request.files['dataset']
+        dataset_name = data.get('datasetName', 'classify_dataset')
+        dataset_path = os.path.join(DATASET_FOLDER, dataset.filename)
+        dataset.save(dataset_path)
+        print("Received dataset ZIP file:", dataset.filename)
+
+        extract_path = os.path.join(DATASET_FOLDER)
+        os.makedirs(extract_path, exist_ok=True)
         
+        # Unzip the dataset
+        with zipfile.ZipFile(dataset_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_path)
+        
+        os.remove(dataset_path)
+        print(f"[*] Unzipped dataset to folder {extract_path}")
+                
         # Training parameters
-        train_params = data.get('train_params', {})
-        learning_rate = train_params.get('learning_rate', LEARNING_RATE)
-        batch_size = train_params.get('batch_size', TRAIN_BATCH)
-        epochs = train_params.get('epochs', N_EPOCHS)
-        optimizer_name = train_params.get('optimizer', 'AdamW')
+        epochs = int(data.get('epochs', 10))
+        batch_size = int(data.get('batchSize', 16))
+        optimizer_name = data.get('optimizer', 'AdamW')
         
         # Load dataset
-        train_list = get_image_paths(dataset_path, phase='train')
-        val_list = get_image_paths(dataset_path, phase='val')
+        list_path = os.path.join(DATASET_FOLDER, dataset_name)
+        train_list = get_image_paths(list_path, phase='train')
+        val_list = get_image_paths(list_path, phase='val')
+
+        # Take all labels from the dataset
+        all_labels = set()
+        for path in train_list + val_list:
+            label = os.path.basename(os.path.dirname(path))
+            all_labels.add(label)
+
+        # Find new labels
+        new_labels = {label for label in all_labels if not label.isdigit() and label not in existing_labels}
+        if new_labels:
+            max_index = max(int(k) for k in class_index.keys())
+            for i, label in enumerate(sorted(new_labels), start=max_index + 1):
+                class_index[str(i)] = label
+                label_to_index[label] = str(i)
+            print(f'[+] Added new labels to mapping: {new_labels}')
+
+            # Save updated mapping to JSON file
+            with open(f'{HOME}/classify/mapping.json', mode='w', encoding='utf-8') as file:
+                json.dump(class_index, file, ensure_ascii=False, indent=2)
+
+        # Rename labels in the dataset
+        def rename_label_folders_to_index(subset: Literal['train', 'val', 'test']):
+            subset_path = os.path.join(DATASET_FOLDER, dataset_name, subset)
+
+            for label in os.listdir(subset_path):
+                label_folder = os.path.join(subset_path, label)
+                if not os.path.isdir(label_folder):
+                    continue
+
+                class_idx = label_to_index.get(label)
+                if class_idx is None:
+                    continue
+
+                new_folder = os.path.join(subset_path, class_idx)
+
+                if label_folder != new_folder:
+                    if os.path.exists(new_folder):
+                        print(f"[!] Folder {new_folder} already exists, skipping {label}")
+                        continue
+                    os.rename(label_folder, new_folder)
+                    print(f"[✓] Renamed {label} -> {class_idx}")
+        
+        rename_label_folders_to_index('train')
+        rename_label_folders_to_index('val')
+
+        # Reload the dataset paths after renaming
+        train_list = get_image_paths(list_path, phase='train')
+        val_list = get_image_paths(list_path, phase='val')
         
         # Create datasets
         train_dataset = SinoNomDataset(train_list, transform=transform, phase='train')
@@ -424,15 +467,24 @@ def train_classification():
         val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         
         # Select model
-        model = get_model()
+        num_classes = len(class_index)
+        print(f"[*] Total number of classes: {num_classes}")
+        model = get_model(num_classes)
+
+        # if pretrained_model:
+        #     print(f"[*] Loading pretrained weights from {pretrained_model}")
+        #     model = load_model(model, pretrained_model)
         
         # Select optimizer
         if optimizer_name.lower() == 'adamw':
-            optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+            optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
         elif optimizer_name.lower() == 'adam':
-            optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+            optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
         else:
-            return jsonify({"error": f"Unsupported optimizer: {optimizer_name}"}), 400
+            return jsonify({
+                "status": "error",
+                "message": f"Unsupported optimizer: {optimizer_name}"
+            }), 200
         
         # Loss function
         criterion = nn.CrossEntropyLoss()
@@ -463,7 +515,6 @@ def train_classification():
                 outputs = model(inputs)
 
                 # Calculate the loss
-                labels = torch.argmax(labels, dim=1)
                 loss = criterion(outputs, labels)
                 train_loss += loss.item() * inputs.size(0)
 
@@ -490,43 +541,46 @@ def train_classification():
                 
                 with torch.no_grad():
                     outputs = model(inputs)
-                    labels = torch.argmax(labels, dim=1)
                     loss = criterion(outputs, labels)
                     val_loss += loss.item() * inputs.size(0)
                     _, preds = torch.max(outputs.data, 1)
                     val_acc += (preds == labels).sum().item()
+
             val_loss /= len(val_dataloader)
             val_acc /= len(val_dataloader.dataset)
             print(f'Epoch {epoch+1} | Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}')
             
-            wandb.log({
-                "train_loss": train_loss,
-                "train_acc": train_acc,
-                "val_loss": val_loss,
-                "val_acc": val_acc,
-                "round": epoch + 1,
-            })
-            save_model(model, f'{HOME}/models/efficientnet_b7_last.pth')
-            
-            if max_val_acc <= val_acc:
-                max_val_acc = val_acc
-                save_model(model, f'{HOME}/models/efficientnet_b7_best.pth')
+            # Store training history
+            train_histories['train_loss'].append(train_loss)
+            train_histories['train_acc'].append(train_acc)
+            train_histories['val_loss'].append(val_loss)
+            train_histories['val_acc'].append(val_acc)
 
-        wandb.finish()
+            # Save model weights
+            save_model(model, f'{HOME}/weights/{model_name}/efficientnet_b7_last.pth')
+            
+            if best_val_acc <= val_acc:
+                best_val_acc = val_acc
+                save_model(model, f'{HOME}/weights/{model_name}/efficientnet_b7_best.pth')
+
+        training_time = time.time() - start_time
+        print(f"Training completed in {training_time:.2f} seconds")
         
         return jsonify({
-            "status": "Classification Training Completed",
-            "model": model_name,
+            "status": "success",
+            "message": f"Classification training completed successfully after {training_time:.2f} seconds.",
+            "training_time": training_time,
             "best_validation_accuracy": best_val_acc,
             "training_histories": train_histories,
-            "model_weights": f'{HOME}/models/efficientnet_b7_best.pth'
+            "model_weights": f'{HOME}/models/{model_name}/efficientnet_b7_best.pth'
         }), 200
     
     except Exception as e:
         return jsonify({
-            "error": str(e),
+            "status": "error",
+            "message": str(e),
             "traceback": str(sys.exc_info())
-        }), 500
+        }), 200
 
 ngrok.set_auth_token(os.environ.get('NGROK_AUTH_TOKEN'))
 url = ngrok.connect(os.environ.get('PORT', 5000)).public_url

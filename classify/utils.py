@@ -32,12 +32,12 @@ def get_image_paths(data_dir: str, phase='train'):
     return image_paths
 
 
-def get_model():
+def get_model(num_classes=2139):
     # model = models.efficientnet_b7(weights=EfficientNet_B7_Weights.DEFAULT)
     # model.features[0][0] = nn.Conv2d(in_channels=3, out_channels=64, kernel_size=3, stride=1, padding=1, bias=False)
     # model.classifier[1] = nn.Linear(in_features=2560, out_features=2139, bias=True)
     
-    model = EfficientNetB7_Dropout(num_classes=2139)
+    model = EfficientNetB7_Dropout(num_classes)
 
     # model = models.vgg16_bn(weights=models.VGG16_BN_Weights.DEFAULT)
     # model.classifier[6] = nn.Linear(in_features=4096, out_features=2139, bias=True)
