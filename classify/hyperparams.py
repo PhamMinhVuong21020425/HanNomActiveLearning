@@ -5,7 +5,8 @@
 HOME = '.'
 DATA_DIR = f'{HOME}/data/wb_recognition_dataset'
 WEIGHT_DIR = f'{HOME}/weights'
-KAGGLE_DIR = '/kaggle/input/effnetdropout/pytorch/default/1'
+# KAGGLE_DIR = f'{HOME}/weights' # For local testing
+KAGGLE_DIR = '/kaggle/input/effnetdropout/pytorch/default/1' # For Kaggle testing
 
 # Hyperparams
 SEED = 2025

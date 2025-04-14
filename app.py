@@ -9,7 +9,6 @@ import sys
 import json
 import time
 import yaml
-import datetime
 import zipfile
 import shutil
 import random
@@ -18,6 +17,7 @@ import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 from typing import Literal
+from datetime import datetime
 from tqdm import tqdm
 from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS, cross_origin 
@@ -43,12 +43,6 @@ std = [0.229, 0.224, 0.225]
 
 transform = ImageTransform(resize, mean, std)
 
-# read json file
-with open(f'{HOME}/classify/mapping.json', mode='r', encoding='utf-8') as file:
-    class_index = json.load(file)
-    label_to_index = {v: k for k, v in class_index.items()}
-    existing_labels = set(class_index.values())
-
 # Active learning strategies
 strategy_names = [
     "RandomSampling",
@@ -65,8 +59,10 @@ strategy_names = [
 app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 DATASET_FOLDER = "datasets"
+OUTPUT_FOLDER = "outputs"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(DATASET_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Config CORS.
 cors = CORS(app)
@@ -159,14 +155,16 @@ def active_learning():
                 "message": f"Invalid strategy. Supported strategies are: {strategy_names}"
             }), 200
         
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") # For unique file/folder names
         pool = request.files['pool']
         pool_name = data.get('poolName')
-        pool_path = os.path.join(DATASET_FOLDER, pool.filename)
+        pool_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{pool.filename}')
+        os.makedirs(os.path.dirname(pool_path), exist_ok=True)
         pool.save(pool_path)
         print("Received pool ZIP file:", pool.filename)
 
         # Unzip the pool data
-        extract_path = os.path.join(DATASET_FOLDER, pool_name, 'train', '0')
+        extract_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{pool_name}', 'train', '0')
         os.makedirs(extract_path, exist_ok=True)
         
         with zipfile.ZipFile(pool_path, 'r') as zip_ref:
@@ -182,7 +180,7 @@ def active_learning():
         print(f"[*] Unzipped pool data to {extract_path}")
 
         # Use existing classification training approach
-        data_path = os.path.join(DATASET_FOLDER, pool_name)
+        data_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{pool_name}')
         data_list = get_image_paths(data_path, phase='train')
         
         # Create datasets
@@ -217,8 +215,7 @@ def active_learning():
         labeled_images = [dataset.file_list[int(i)] for i in labeled_idxs]
 
         # Zip the labeled images for download
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        zip_file_path = os.path.join(DATASET_FOLDER, f'labeled_images_{timestamp}.zip')
+        zip_file_path = os.path.join(OUTPUT_FOLDER, f'labeled_images_{timestamp}.zip')
 
         with zipfile.ZipFile(zip_file_path, 'w') as zipf:
             for img_path in labeled_images:
@@ -226,6 +223,9 @@ def active_learning():
                 zipf.write(img_path, filename)
 
         print(f"[*] Labeled images saved to {zip_file_path}")
+
+        # Remove the pool folder after processing
+        shutil.rmtree(data_path)
 
         return jsonify({
             "status": "success",
@@ -242,19 +242,20 @@ def active_learning():
             "traceback": str(sys.exc_info())
         }), 200
 
-def create_yaml_config(dataset_name, num_classes, class_names, train_path, val_path):
+def create_yaml_config(dataset_path, num_classes, class_names, train_path, val_path):
     """
     Create a dataset configuration YAML file for YOLOv5 training
     """
     config = {
-        'path': os.path.abspath(os.path.join(DATASET_FOLDER, dataset_name)),
+        'path': os.path.abspath(dataset_path),
         'train': train_path,
         'val': val_path,
         'nc': num_classes,
         'names': class_names
     }
     
-    config_path = os.path.join(DATASET_FOLDER, f'{dataset_name}.yaml')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    config_path = os.path.join(dataset_path, f'{timestamp}_data_config.yaml')
     with open(config_path, 'w') as outfile:
         yaml.dump(config, outfile, default_flow_style=False)
     
@@ -274,76 +275,78 @@ def train_detection():
     epochs = int(data.get('epochs', 100))
     batch_size = int(data.get('batchSize', 16))
 
-    # Get dataset file from request
-    dataset = request.files['dataset']
-    dataset_name = dataset.filename.split('.')[0]
-    dataset_path = os.path.join(DATASET_FOLDER, dataset.filename)
-    dataset.save(dataset_path)
-    print("Received dataset ZIP file:", dataset.filename)
-
-    extract_path = os.path.join(DATASET_FOLDER, dataset_name)
-    temp_extract_path = os.path.join(DATASET_FOLDER, f"temp_{dataset_name}")
-    
-    os.makedirs(extract_path, exist_ok=True)
-    os.makedirs(temp_extract_path, exist_ok=True)
-    
-    # Unzip the dataset
-    with zipfile.ZipFile(dataset_path, 'r') as zip_ref:
-        zip_ref.extractall(temp_extract_path)
-    
-    image_exts = {'jpg', 'jpeg', 'png'}
-    image_files = []
-    
-    for root, _, files in os.walk(temp_extract_path):
-        for file in files:
-            file_path = os.path.join(root, file)
-            ext = file.split('.')[-1].lower()
-            if ext in image_exts:
-                image_files.append(file_path)
-    
-    # Shuffle and split dataset into train and validation sets
-    random.seed(42)
-    random.shuffle(image_files)
-    split_idx = int(0.9 * len(image_files))  # 90% train, 10% val
-    train_images, val_images = image_files[:split_idx], image_files[split_idx:]
-    
-    # Create directories for train and val images and labels
-    train_image_dir = os.path.join(extract_path, 'images', 'train')
-    val_image_dir = os.path.join(extract_path, 'images', 'val')
-    train_label_dir = os.path.join(extract_path, 'labels', 'train')
-    val_label_dir = os.path.join(extract_path, 'labels', 'val')
-    
-    for folder in [train_image_dir, val_image_dir, train_label_dir, val_label_dir]:
-        os.makedirs(folder, exist_ok=True)
-    
-    # Function to move files to the respective directories
-    def move_files(image_list, image_dest, label_dest):
-        for image in image_list:
-            label = (os.path.splitext(image)[0] + '.txt').replace('images', 'labels')
-            if os.path.exists(label):
-                shutil.move(label, os.path.join(label_dest, os.path.basename(label)))
-            shutil.move(image, os.path.join(image_dest, os.path.basename(image)))
-    
-    # Move files to the respective directories
-    move_files(train_images, train_image_dir, train_label_dir)
-    move_files(val_images, val_image_dir, val_label_dir)
-    
-    # Remove temporary files
-    shutil.rmtree(temp_extract_path)
-    os.remove(dataset_path)
-    print(f"[*] Unzipped dataset to {extract_path}")
-
-    train_path = os.path.join('images', 'train')
-    val_path = os.path.join('images', 'val')
-
-    # Create YAML configuration
-    data_yaml_path = create_yaml_config(dataset_name, num_classes, class_names, train_path, val_path)
-    
     try:
+        # Get dataset file from request
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") # For unique file/folder names
+        dataset = request.files['dataset']
+        dataset_name = dataset.filename.split('.')[0]
+        dataset_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{dataset.filename}')
+        os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+        dataset.save(dataset_path)
+        print("Received dataset ZIP file:", dataset.filename)
+
+        extract_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{dataset_name}')
+        temp_extract_path = os.path.join(DATASET_FOLDER, f'temp_{timestamp}_{dataset_name}')
+        
+        os.makedirs(extract_path, exist_ok=True)
+        os.makedirs(temp_extract_path, exist_ok=True)
+        
+        # Unzip the dataset
+        with zipfile.ZipFile(dataset_path, 'r') as zip_ref:
+            zip_ref.extractall(temp_extract_path)
+        
+        image_exts = {'jpg', 'jpeg', 'png'}
+        image_files = []
+        
+        for root, _, files in os.walk(temp_extract_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                ext = file.split('.')[-1].lower()
+                if ext in image_exts:
+                    image_files.append(file_path)
+        
+        # Shuffle and split dataset into train and validation sets
+        random.seed(42)
+        random.shuffle(image_files)
+        split_idx = int(0.9 * len(image_files))  # 90% train, 10% val
+        train_images, val_images = image_files[:split_idx], image_files[split_idx:]
+        
+        # Create directories for train and val images and labels
+        train_image_dir = os.path.join(extract_path, 'images', 'train')
+        val_image_dir = os.path.join(extract_path, 'images', 'val')
+        train_label_dir = os.path.join(extract_path, 'labels', 'train')
+        val_label_dir = os.path.join(extract_path, 'labels', 'val')
+        
+        for folder in [train_image_dir, val_image_dir, train_label_dir, val_label_dir]:
+            os.makedirs(folder, exist_ok=True)
+        
+        # Function to move files to the respective directories
+        def move_files(image_list, image_dest, label_dest):
+            for image in image_list:
+                label = (os.path.splitext(image)[0] + '.txt').replace('images', 'labels')
+                if os.path.exists(label):
+                    shutil.move(label, os.path.join(label_dest, os.path.basename(label)))
+                shutil.move(image, os.path.join(image_dest, os.path.basename(image)))
+        
+        # Move files to the respective directories
+        move_files(train_images, train_image_dir, train_label_dir)
+        move_files(val_images, val_image_dir, val_label_dir)
+        
+        # Remove temporary files
+        shutil.rmtree(temp_extract_path)
+        os.remove(dataset_path)
+        print(f"[*] Unzipped dataset to {extract_path}")
+
+        train_path = os.path.join('images', 'train')
+        val_path = os.path.join('images', 'val')
+
+        # Create YAML configuration
+        data_yaml_path = create_yaml_config(extract_path, num_classes, class_names, train_path, val_path)
+        
         # Prepare training options
         opt = parse_opt()
         opt.data = data_yaml_path
-        opt.weights = 'yolov5/yolov5n.pt'  # default to small model, can be parameterized
+        opt.weights = 'yolov5/yolov5s.pt'  # default to small model, can be parameterized
         opt.cfg = ''  # use default model configuration
         opt.epochs = epochs
         opt.batch_size = batch_size
@@ -355,13 +358,16 @@ def train_detection():
         
         # Prepare response
         training_time = time.time() - start_time
-        best_model_path = os.path.join(save_dir, 'weights', 'best.pt')
-        
+        best_model_path = f'{save_dir}/weights/best.pt'
+
+        # Remove the dataset folder after training
+        shutil.rmtree(extract_path)
+
         return jsonify({
             "status": "success",
             "message": f"Detection training completed successfully after {training_time:.2f} seconds.",
             "training_time": training_time,
-            "results": metrics,
+            "metrics": metrics,
             "best_model_path": best_model_path
         }), 200
     
@@ -384,13 +390,15 @@ def train_classification():
         pretrained_model = data.get('pretrainedModel', './weights/efficientnet_b7_last.pth')
         
         # Get dataset file from request
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") # For unique file/folder names
         dataset = request.files['dataset']
         dataset_name = data.get('datasetName', 'classify_dataset')
-        dataset_path = os.path.join(DATASET_FOLDER, dataset.filename)
+        dataset_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{dataset.filename}')
+        os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
         dataset.save(dataset_path)
         print("Received dataset ZIP file:", dataset.filename)
 
-        extract_path = os.path.join(DATASET_FOLDER)
+        extract_path = os.path.join(DATASET_FOLDER, f'{timestamp}_{dataset_name}')
         os.makedirs(extract_path, exist_ok=True)
         
         # Unzip the dataset
@@ -406,9 +414,16 @@ def train_classification():
         optimizer_name = data.get('optimizer', 'AdamW')
         
         # Load dataset
-        list_path = os.path.join(DATASET_FOLDER, dataset_name)
+        list_path = os.path.join(extract_path, dataset_name)
         train_list = get_image_paths(list_path, phase='train')
         val_list = get_image_paths(list_path, phase='val')
+
+        # read json file
+        mapping_path = os.path.join(HOME, 'classify', 'mapping.json')
+        with open(mapping_path, mode='r', encoding='utf-8') as file:
+            class_index = json.load(file)
+            label_to_index = {v: k for k, v in class_index.items()}
+            existing_labels = set(class_index.values())
 
         # Take all labels from the dataset
         all_labels = set()
@@ -426,12 +441,12 @@ def train_classification():
             print(f'[+] Added new labels to mapping: {new_labels}')
 
             # Save updated mapping to JSON file
-            with open(f'{HOME}/classify/mapping.json', mode='w', encoding='utf-8') as file:
-                json.dump(class_index, file, ensure_ascii=False, indent=2)
+            with open(mapping_path, mode='w', encoding='utf-8') as file:
+                json.dump(class_index, file, ensure_ascii=False, indent=4)
 
         # Rename labels in the dataset
         def rename_label_folders_to_index(subset: Literal['train', 'val', 'test']):
-            subset_path = os.path.join(DATASET_FOLDER, dataset_name, subset)
+            subset_path = os.path.join(extract_path, dataset_name, subset)
 
             for label in os.listdir(subset_path):
                 label_folder = os.path.join(subset_path, label)
@@ -463,7 +478,7 @@ def train_classification():
         val_dataset = SinoNomDataset(val_list, transform=transform, phase='val')
         
         # Create data loaders (you might want to modify this based on your existing code)
-        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, generator=torch.Generator(device=device))
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         
         # Select model
@@ -498,6 +513,9 @@ def train_classification():
             'val_loss': [],
             'val_acc': []
         }
+
+        last_model_path = f'{HOME}/weights/{model_name}_{timestamp}/efficientnet_b7_last.pth'
+        best_model_path = f'{HOME}/weights/{model_name}_{timestamp}/efficientnet_b7_best.pth'
 
         for epoch in range(epochs):
             print(f'Epoch {epoch+1}/{epochs}')
@@ -557,22 +575,26 @@ def train_classification():
             train_histories['val_acc'].append(val_acc)
 
             # Save model weights
-            save_model(model, f'{HOME}/weights/{model_name}/efficientnet_b7_last.pth')
+            save_model(model, last_model_path)
             
             if best_val_acc <= val_acc:
                 best_val_acc = val_acc
-                save_model(model, f'{HOME}/weights/{model_name}/efficientnet_b7_best.pth')
+                save_model(model, best_model_path)
 
         training_time = time.time() - start_time
         print(f"Training completed in {training_time:.2f} seconds")
+
+        # Remove the dataset folder after training
+        shutil.rmtree(extract_path)
         
         return jsonify({
             "status": "success",
             "message": f"Classification training completed successfully after {training_time:.2f} seconds.",
             "training_time": training_time,
-            "best_validation_accuracy": best_val_acc,
+            "num_classes": num_classes,
+            "best_val_acc": best_val_acc,
             "training_histories": train_histories,
-            "model_weights": f'{HOME}/models/{model_name}/efficientnet_b7_best.pth'
+            "model_weights": best_model_path
         }), 200
     
     except Exception as e:

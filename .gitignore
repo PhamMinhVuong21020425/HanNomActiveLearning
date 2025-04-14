@@ -1,6 +1,7 @@
 data/*
 weights/*
 datasets
+outputs
 checkpoints
 runs
 wandb
