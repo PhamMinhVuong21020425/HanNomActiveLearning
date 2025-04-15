@@ -100,6 +100,32 @@ def load_model(model, MODEL_PATH):
     return model
 
 
+def load_dynamic_model(model, model_path, num_classes, pretrained_n_classes):
+    print(f"[*] Pretrained model num_classes: {pretrained_n_classes}, Current model num_classes: {num_classes}")
+    
+    # Load raw state_dict
+    state_dict = torch.load(model_path, map_location=device, weights_only=True)
+
+    if num_classes != pretrained_n_classes:
+        print("[!] Number of classes differs — loading partial weights (excluding final layer)")
+        model_state = model.state_dict()
+        filtered_dict = {}
+
+        for k, v in state_dict.items():
+            if k in model_state and v.shape == model_state[k].shape:
+                filtered_dict[k] = v
+            else:
+                print(f"[!] Skipping: {k} | pre-trained shape: {v.shape}, model shape: {model_state.get(k, None)}")
+
+        model.load_state_dict(filtered_dict, strict=False)
+    else:
+        print("[*] Number of classes matches — loading all weights")
+        model.load_state_dict(state_dict)
+
+    model.to(device)
+    return model
+
+
 def load_check_point(model, optimizer, CHECK_POINT_PATH):
     check_point = torch.load(CHECK_POINT_PATH, map_location=device)
     model.load_state_dict(check_point['model_state_dict'])

@@ -26,15 +26,16 @@ from dotenv import load_dotenv
 
 from firebase import db
 from predict import Predictor
+from yolov5.models.experimental import attempt_load
 from yolov5.train import main, parse_opt
 from classify.transform import ImageTransform
+from classify.models import EfficientNetB7_Dropout
 from classify.dataset import SinoNomDataset, ActiveLearningDataset
 from classify.models import ActiveLearningNet
 from classify.config import *
 from classify.utils import *
 
 load_dotenv()
-predictor = Predictor()
 
 # Image transforms
 resize = 64
@@ -85,6 +86,7 @@ def favicon():
 @app.route("/test", methods=['GET'])
 @cross_origin()
 def test():
+    predictor = Predictor()
     source = './yolov5/data/images/test4.png'
     json_objects = predictor.predict(source, classify=False)
     return jsonify(json_objects)
@@ -95,9 +97,25 @@ def object_detection():
     start = time.time()
     files = request.files.getlist("files")
 
+    # Load model
+    data = request.form.to_dict()
+    model_detect_path = data.get('modelDetectPath') or f'{WEIGHT_DIR}/yolov5m_best.pt'
+    model_detect = attempt_load(weights=model_detect_path, map_location=device)
+
+    num_classes = int(data.get('num_classes') or 2139)
+    model_classify_path = data.get('modelClassifyPath') or f'{KAGGLE_DIR}/efficientnet_b7_best.pth'
+    model_classify = get_model(num_classes)
+    model_classify = load_model(model_classify, model_classify_path)
+    model_classify.to(device).eval()
+    predictor = Predictor(model_classify=model_classify, model_detect=model_detect)
+
+    print(f"[*] Model loaded: {model_detect_path} and {model_classify_path}")
+    print(f"[*] Number of classes for classify: {num_classes}")
+
     output = []
     for file in files:
-        file_path = os.path.join(UPLOAD_FOLDER, f'temp.{file.filename.split(".")[-1]}')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = os.path.join(UPLOAD_FOLDER, f'temp_{timestamp}.{file.filename.split(".")[-1]}')
         file.save(file_path)
 
         json_objects = predictor.predict(source=file_path, classify=True, batch_size=64)
@@ -120,8 +138,19 @@ def image_classification():
     start = time.time()
     img = request.files["img"]
     
-    img_path = os.path.join(UPLOAD_FOLDER, f'temp.{img.filename.split(".")[-1]}')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    img_path = os.path.join(UPLOAD_FOLDER, f'temp_{timestamp}.{img.filename.split(".")[-1]}')
     img.save(img_path)
+
+    # Load model
+    data = request.form.to_dict()
+    num_classes = int(data.get('num_classes') or 2139)
+    model_path = data.get('modelPath') or f'{KAGGLE_DIR}/efficientnet_b7_best.pth'
+    
+    model_classify = EfficientNetB7_Dropout(num_classes)
+    model_classify = load_model(model_classify, model_path)
+    model_classify.to(device).eval()
+    predictor = Predictor(model_classify=model_classify)
 
     class_id, predicted_label, confidence = predictor.classify_single(img_path)
 
@@ -146,7 +175,10 @@ def active_learning():
         # Validate and extract parameters
         strategy_name = data.get('strategy')
         n_samples = int(data.get('n_samples'))
-        model_infer = data.get('modelInference')
+        num_classes = int(data.get('num_classes') or 2139)
+        model_infer_path = data.get('modelPath') or f'{KAGGLE_DIR}/efficientnet_b7_best.pth'
+        print(f"[*] Model is loading: {model_infer_path}")
+        print(f'[*] Number of classes for classify: {num_classes}')
         
         # Validate strategy
         if strategy_name not in strategy_names:
@@ -191,7 +223,7 @@ def active_learning():
         
         # Initialize model and active learning components
         net = ActiveLearningNet(
-            model=load_model(get_model(), f'{KAGGLE_DIR}/efficientnet_b7_best.pth'),
+            model=load_model(get_model(num_classes), model_infer_path),
             device=device,
             criterion=nn.CrossEntropyLoss(),
             optimizer_cls=optim.AdamW,
@@ -266,8 +298,7 @@ def create_yaml_config(dataset_path, num_classes, class_names, train_path, val_p
 def train_detection():
     # Get training parameters from form data
     data = request.form.to_dict()
-    model_name = data.get('modelName', 'yolov5s')
-    pretrained_model = data.get('pretrainedModel', 'yolov5s.pt')
+    pretrained_model_path = data.get('pretrainedModelPath') or 'yolov5/yolov5s.pt'
     num_classes = 1
     class_names = ['character']
     
@@ -346,11 +377,13 @@ def train_detection():
         # Prepare training options
         opt = parse_opt()
         opt.data = data_yaml_path
-        opt.weights = 'yolov5/yolov5s.pt'  # default to small model, can be parameterized
+        opt.weights = pretrained_model_path  # default to small model, can be parameterized
         opt.cfg = ''  # use default model configuration
         opt.epochs = epochs
         opt.batch_size = batch_size
         opt.project = 'yolov5/runs/train'
+
+        print(f"[*] Model loaded: {pretrained_model_path}")
                 
         # Start training
         start_time = time.time()
@@ -387,7 +420,7 @@ def train_classification():
         # Get training parameters from form data
         data = request.form.to_dict()
         model_name = data.get('modelName').replace(' ', '_').lower()
-        pretrained_model = data.get('pretrainedModel', './weights/efficientnet_b7_last.pth')
+        pretrained_model_path = data.get('pretrainedModelPath')
         
         # Get dataset file from request
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") # For unique file/folder names
@@ -482,13 +515,14 @@ def train_classification():
         val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
         
         # Select model
+        pretrained_n_classes = int(data.get('num_classes'))
         num_classes = len(class_index)
         print(f"[*] Total number of classes: {num_classes}")
         model = get_model(num_classes)
 
-        # if pretrained_model:
-        #     print(f"[*] Loading pretrained weights from {pretrained_model}")
-        #     model = load_model(model, pretrained_model)
+        if pretrained_model_path:
+            model = load_dynamic_model(model, pretrained_model_path, num_classes, pretrained_n_classes)
+            print(f"[*] Pre-trained model loaded: {pretrained_model_path}")
         
         # Select optimizer
         if optimizer_name.lower() == 'adamw':
