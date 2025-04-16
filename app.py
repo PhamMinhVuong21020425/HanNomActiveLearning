@@ -8,7 +8,7 @@ import os
 import sys
 import json
 import time
-import yaml
+import mimetypes
 import zipfile
 import shutil
 import random
@@ -19,13 +19,14 @@ from torch.utils.data import DataLoader
 from typing import Literal
 from datetime import datetime
 from tqdm import tqdm
-from flask import Flask, send_from_directory, request, jsonify
+from flask import Flask, send_from_directory, request, jsonify, send_file
 from flask_cors import CORS, cross_origin 
 from pyngrok import ngrok
 from dotenv import load_dotenv
 
 from firebase import db
 from predict import Predictor
+from myutils import is_path_allowed, get_absolute_path, create_yaml_config
 from yolov5.models.experimental import attempt_load
 from yolov5.train import main, parse_opt
 from classify.transform import ImageTransform
@@ -90,6 +91,81 @@ def test():
     source = './yolov5/data/images/test4.png'
     json_objects = predictor.predict(source, classify=False)
     return jsonify(json_objects)
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
+@app.route('/api/file/download', methods=['POST'])
+@cross_origin()
+def download_file():
+    data = request.get_json()
+    requested_path = data['file_path']
+    requested_path = os.path.normpath(requested_path)
+    
+    try:
+        if not is_path_allowed(requested_path):
+            print(f"Access denied for path: {requested_path}")
+            return jsonify({"error": "Access denied"}), 403
+        
+        absolute_path = get_absolute_path(requested_path)
+        
+        if not os.path.exists(absolute_path):
+            return jsonify({"error": "File not found"}), 404
+        
+        if not os.path.isfile(absolute_path):
+            return jsonify({"error": "Not a file"}), 400
+        
+        file_name = os.path.basename(absolute_path)
+        
+        # Serve the file using send_file
+        print(f"Serving file: {requested_path}...")
+        return send_file(
+            path_or_file=absolute_path,
+            mimetype=mimetypes.guess_type(absolute_path)[0] or 'application/octet-stream',
+            as_attachment=True,
+            download_name=file_name
+        )
+    
+    except Exception as e:
+        print(f"Error serving file '{requested_path}': {str(e)}")
+        return jsonify({"error": f"Could not download file: {str(e)}"}), 500
+
+@app.route('/api/file/delete', methods=['POST'])
+@cross_origin()
+def delete_file():
+    data = request.get_json()
+    requested_path = data['file_path']
+    requested_path = os.path.normpath(requested_path)
+    
+    try:
+        if not is_path_allowed(requested_path):
+            print(f"Access denied for path: {requested_path}")
+            return jsonify({"error": "Access denied"}), 403
+        
+        absolute_path = get_absolute_path(requested_path)
+        
+        if not os.path.exists(absolute_path):
+            return jsonify({"error": "File not found"}), 404
+        
+        if not os.path.isfile(absolute_path):
+            return jsonify({"error": "Not a file"}), 400
+        
+        # Remove the file
+        os.remove(absolute_path)
+        print(f"File deleted: {requested_path}")
+        
+        return jsonify({
+            "message": "File deleted successfully",
+            "file_path": requested_path
+        }), 200
+    
+    except Exception as e:
+        print(f"Error deleting file '{requested_path}': {str(e)}")
+        return jsonify({"error": f"Could not delete file: {str(e)}"}), 500
 
 @app.route("/api/detect", methods=['POST'])
 @cross_origin()
@@ -273,25 +349,6 @@ def active_learning():
             "message": str(e),
             "traceback": str(sys.exc_info())
         }), 200
-
-def create_yaml_config(dataset_path, num_classes, class_names, train_path, val_path):
-    """
-    Create a dataset configuration YAML file for YOLOv5 training
-    """
-    config = {
-        'path': os.path.abspath(dataset_path),
-        'train': train_path,
-        'val': val_path,
-        'nc': num_classes,
-        'names': class_names
-    }
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    config_path = os.path.join(dataset_path, f'{timestamp}_data_config.yaml')
-    with open(config_path, 'w') as outfile:
-        yaml.dump(config, outfile, default_flow_style=False)
-    
-    return config_path
 
 @app.route("/api/train/detection", methods=['POST'])
 @cross_origin()
