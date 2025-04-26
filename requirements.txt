@@ -12,6 +12,9 @@ PyYAML
 requests
 scipy
 thop
+tensorboard
+pandas
+seaborn
 
 # Web app
 Flask
