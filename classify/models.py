@@ -82,7 +82,7 @@ class ActiveLearningNet:
             data,
             batch_size=PREDICT_BATCH,
             shuffle=False,
-            pin_memory=True,
+            pin_memory=False,
             num_workers=N_WORKERS,
         )
         
@@ -106,7 +106,7 @@ class ActiveLearningNet:
             data,
             batch_size=PREDICT_BATCH,
             shuffle=False,
-            pin_memory=True,
+            pin_memory=False,
             num_workers=N_WORKERS,
         )
 
@@ -140,7 +140,7 @@ class ActiveLearningNet:
             data,
             batch_size=PREDICT_BATCH,
             shuffle=False,
-            pin_memory=True,
+            pin_memory=False,
             num_workers=N_WORKERS,
         )
 

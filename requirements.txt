@@ -15,6 +15,7 @@ thop
 tensorboard
 pandas
 seaborn
+onnxruntime
 
 # Web app
 Flask
